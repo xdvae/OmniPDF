@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OmniPDF Command Center</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React Dependencies -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Core Logic Libraries -->
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <script src="https://unpkg.com/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+
+    <!-- Markdown Parser for AI Responses -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+        
+        body { font-family: 'Space Grotesk', sans-serif; background-color: #0f172a; color: #e2e8f0; }
+        
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(148, 163, 184, 0.1);
+        }
+
+        .accordion-content {
+            transition: max-height 0.3s ease-in-out, opacity 0.3s ease-in-out;
+            max-height: 0;
+            opacity: 0;
+            overflow: hidden;
+        }
+        .accordion-content.open {
+            max-height: 2000px;
+            opacity: 1;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+        .loader-spin { animation: spin 1s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        .ai-response h1 { font-size: 1.5em; font-weight: bold; margin-bottom: 0.5em; color: #60a5fa; }
+        .ai-response h2 { font-size: 1.25em; font-weight: bold; margin-bottom: 0.5em; margin-top: 1em; color: #93c5fd; }
+        .ai-response ul { list-style-type: disc; margin-left: 1.5em; margin-bottom: 1em; }
+        .ai-response p { margin-bottom: 0.75em; line-height: 1.6; }
+        .ai-response strong { color: #f8fafc; }
+    </style>
+</head>
+<body>
+
+<div id="root"></div>
+
+<script type="text/babel">
+    // Configure PDF.js Worker
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+    const { useState, useEffect, useRef } = React;
+    const { PDFDocument, rgb, StandardFonts } = PDFLib;
+
+    const apiKey = ""; // API Key provided by environment
+
+    // --- Icons ---
+    const Icons = {
+        ChevronDown: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>,
+        Image: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>,
+        Merge: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m8 3 4 8 5-5 5 15H2L8 3z"/></svg>,
+        FileText: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>,
+        Convert: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>,
+        Trash: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>,
+        Rotate: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>,
+        ArrowUp: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m18 15-6-6-6 6"/></svg>,
+        ArrowDown: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>,
+        Download: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+        Upload: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
+        Sparkles: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>,
+        Send: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+    };
+
+    function App() {
+        const [openSection, setOpenSection] = useState('ai');
+        const [notification, setNotification] = useState(null);
+
+        // --- Shared Helper: Text Extraction ---
+        const extractTextFromPdf = async (arrayBuffer) => {
+            const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+            let fullText = "";
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items.map(item => item.str).join(' ');
+                fullText += pageText + "\n";
+            }
+            return fullText;
+        };
+
+        const showNotification = (msg, type = 'info') => {
+            setNotification({ msg, type });
+            setTimeout(() => setNotification(null), 5000);
+        };
+
+        // --- State: AI Section ---
+        const [aiFile, setAiFile] = useState(null);
+        const [aiContext, setAiContext] = useState(""); 
+        const [aiQuestion, setAiQuestion] = useState("");
+        const [aiResponse, setAiResponse] = useState("");
+        const [aiLoading, setAiLoading] = useState(false);
+
+        // --- State: Media Section (New Filename State) ---
+        const [mediaFiles, setMediaFiles] = useState([]);
+        const [mediaProcessing, setMediaProcessing] = useState(false);
+        const [mediaFileName, setMediaFileName] = useState('omnipdf_images');
+
+        // --- State: Merge Section (New Filename State) ---
+        const [mergeFiles, setMergeFiles] = useState([]);
+        const [mergeProcessing, setMergeProcessing] = useState(false);
+        const [mergeFileName, setMergeFileName] = useState('omnipdf_merged');
+
+        // --- State: Convert Section (New Filename State) ---
+        const [convertFile, setConvertFile] = useState(null);
+        const [convertMode, setConvertMode] = useState('jpg'); // jpg, txt, docx
+        const [convertProcessing, setConvertProcessing] = useState(false);
+        const [convertFileName, setConvertFileName] = useState('omnipdf_export');
+
+        // --- Component: Filename Input (Reusable) ---
+        const FileNameInput = ({ fileName, setFileName, defaultName, extension }) => (
+            <div className="mb-4">
+                <label className="block mb-1 text-sm font-medium text-slate-400">Output File Name</label>
+                <div className="flex items-center bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+                    <input
+                        type="text"
+                        value={fileName}
+                        onChange={(e) => setFileName(e.target.value)}
+                        placeholder={defaultName}
+                        className="flex-1 bg-transparent px-3 py-2 text-sm focus:outline-none"
+                    />
+                    <span className="px-3 text-sm text-slate-500 bg-slate-700/50 border-l border-slate-700">.{extension}</span>
+                </div>
+                {fileName.length === 0 && (
+                    <p className="text-xs text-slate-500 mt-1">Defaulting to: {defaultName}.{extension}</p>
+                )}
+            </div>
+        );
+
+        // --- AI LOGIC (Unchanged) ---
+        const handleAiUpload = async (e) => {
+            if (e.target.files && e.target.files[0]) {
+                const file = e.target.files[0];
+                setAiFile(file);
+                setAiContext("");
+                setAiResponse("");
+                setAiLoading(true);
+                try {
+                    const text = await extractTextFromPdf(await file.arrayBuffer());
+                    setAiContext(text.substring(0, 30000));
+                    showNotification("PDF analyzed successfully! Ready for AI.", "success");
+                } catch (err) {
+                    showNotification("Failed to read PDF text. Is it scanned?", "error");
+                    console.error(err);
+                }
+                setAiLoading(false);
+            }
+        };
+
+        const callGeminiAPI = async (promptText) => {
+            setAiLoading(true);
+            setAiResponse("");
+            try {
+                const response = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: promptText }] }]
+                        })
+                    }
+                );
+
+                if (!response.ok) throw new Error('AI Service Busy');
+                const data = await response.json();
+                const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "No response generated.";
+                setAiResponse(text);
+            } catch (err) {
+                showNotification("AI Error: " + err.message, "error");
+            }
+            setAiLoading(false);
+        };
+
+        const handleSummarize = () => {
+            if (!aiContext) return;
+            const prompt = `Summarize the following document content concisely in bullet points:\n\n${aiContext}`;
+            callGeminiAPI(prompt);
+        };
+
+        const handleAskQuestion = () => {
+            if (!aiContext || !aiQuestion.trim()) return;
+            const prompt = `Based strictly on the document content provided below, answer the user's question.\n\nDocument Content:\n${aiContext}\n\nUser Question: ${aiQuestion}`;
+            callGeminiAPI(prompt);
+        };
+
+
+        // --- Media Handlers ---
+        const handleMediaUpload = (e) => {
+            if (e.target.files) {
+                const newFiles = Array.from(e.target.files).map(file => ({
+                    file, id: Math.random().toString(36).substr(2, 9), rotation: 0, previewUrl: URL.createObjectURL(file)
+                }));
+                setMediaFiles(prev => [...prev, ...newFiles]);
+            }
+        };
+        const rotateMedia = (id) => setMediaFiles(prev => prev.map(item => item.id === id ? { ...item, rotation: (item.rotation + 90) % 360 } : item));
+        const removeMedia = (id) => setMediaFiles(prev => prev.filter(item => item.id !== id));
+        const moveMedia = (index, direction) => {
+            const newFiles = [...mediaFiles];
+            if (index + direction < 0 || index + direction >= newFiles.length) return;
+            [newFiles[index], newFiles[index + direction]] = [newFiles[index + direction], newFiles[index]];
+            setMediaFiles(newFiles);
+        };
+        
+        // --- GENERATE MEDIA PDF FUNCTION (Dynamic Page Size) ---
+        const generateMediaPdf = async () => {
+            setMediaProcessing(true);
+            const fileName = (mediaFileName || 'omnipdf_images').replace(/\.pdf$/i, '');
+            try {
+                const doc = await PDFDocument.create();
+                for (const item of mediaFiles) {
+                    // 1. Sanitize Image using Canvas (Fixes SOI & File Type issues)
+                    const img = new Image();
+                    img.src = item.previewUrl;
+                    await new Promise((resolve, reject) => { 
+                        if(img.complete) resolve();
+                        else { img.onload = resolve; img.onerror = reject; }
+                    });
+
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.naturalWidth || img.width;
+                    canvas.height = img.naturalHeight || img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+
+                    const isJpeg = item.file.type === 'image/jpeg' || item.file.name.toLowerCase().endsWith('.jpg') || item.file.name.toLowerCase().endsWith('.jpeg');
+                    const outputFormat = isJpeg ? 'image/jpeg' : 'image/png';
+
+                    const blob = await new Promise(resolve => canvas.toBlob(resolve, outputFormat, 0.95));
+                    const buffer = await blob.arrayBuffer();
+
+                    let image;
+                    if (outputFormat === 'image/jpeg') {
+                        image = await doc.embedJpg(buffer);
+                    } else {
+                        image = await doc.embedPng(buffer);
+                    }
+
+                    const { width, height } = image.scale(1);
+                    const rotation = item.rotation % 360;
+                    const isRotated = rotation % 180 !== 0;
+
+                    const pageWidth = isRotated ? height : width;
+                    const pageHeight = isRotated ? width : height;
+
+                    const page = doc.addPage([pageWidth, pageHeight]);
+                    
+                    const scaledWidth = width;
+                    const scaledHeight = height;
+
+                    // Centering Logic (Handles rotation coordinate shifts)
+                    const cx = pageWidth / 2;
+                    const cy = pageHeight / 2;
+                    let x, y;
+
+                    if (rotation === 0) {
+                        x = cx - scaledWidth / 2;
+                        y = cy - scaledHeight / 2;
+                    } else if (rotation === 90) {
+                        x = cx + scaledHeight / 2;
+                        y = cy - scaledWidth / 2;
+                    } else if (rotation === 180) {
+                        x = cx + scaledWidth / 2;
+                        y = cy + scaledHeight / 2;
+                    } else if (rotation === 270) {
+                        x = cx - scaledHeight / 2;
+                        y = cy + scaledWidth / 2;
+                    } else {
+                        x = cx - scaledWidth / 2;
+                        y = cy - scaledHeight / 2;
+                    }
+
+                    page.drawImage(image, {
+                        x: x,
+                        y: y,
+                        width: scaledWidth,
+                        height: scaledHeight,
+                        rotate: PDFLib.degrees(rotation),
+                    });
+                }
+                const pdfBytes = await doc.save();
+                saveAs(new Blob([pdfBytes], { type: "application/pdf" }), `${fileName}.pdf`);
+                showNotification("PDF Created Successfully!", "success");
+            } catch (err) { 
+                console.error(err);
+                showNotification("Error creating PDF: " + err.message, "error"); 
+            }
+            setMediaProcessing(false);
+        };
+
+        // --- Merge Handlers ---
+        const handleMergeUpload = (e) => {
+            if (e.target.files) {
+                const newFiles = Array.from(e.target.files).map(file => ({
+                    file, id: Math.random().toString(36).substr(2, 9), type: file.name.endsWith('.docx') ? 'docx' : 'pdf'
+                }));
+                setMergeFiles(prev => [...prev, ...newFiles]);
+            }
+        };
+        const moveMergeFile = (index, direction) => {
+            const newFiles = [...mergeFiles];
+            if (index + direction < 0 || index + direction >= newFiles.length) return;
+            [newFiles[index], newFiles[index + direction]] = [newFiles[index + direction], newFiles[index]];
+            setMergeFiles(newFiles);
+        };
+        const executeMerge = async () => {
+            setMergeProcessing(true);
+            const fileName = (mergeFileName || 'omnipdf_merged').replace(/\.pdf$/i, '');
+            try {
+                const mergedPdf = await PDFDocument.create();
+                for (const item of mergeFiles) {
+                    const buffer = await item.file.arrayBuffer();
+                    if (item.type === 'pdf') {
+                        const pdf = await PDFDocument.load(buffer);
+                        const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+                        copiedPages.forEach(page => mergedPdf.addPage(page));
+                    } else if (item.type === 'docx') {
+                        const result = await mammoth.extractRawText({ arrayBuffer: buffer });
+                        const text = result.value;
+                        const page = mergedPdf.addPage();
+                        const font = await mergedPdf.embedFont(StandardFonts.Helvetica);
+                        const { width, height } = page.getSize();
+                        page.drawText(`Content from ${item.file.name}:`, { x: 50, y: height - 50, size: 14, font });
+                        const lines = text.split('\n');
+                        let y = height - 80;
+                        const maxChars = 90; 
+                        for (const line of lines) {
+                            if (y < 50) break; 
+                            const chunks = line.match(new RegExp('.{1,' + maxChars + '}', 'g')) || [''];
+                            for (const chunk of chunks) {
+                                page.drawText(chunk, { x: 50, y, size: 12, font });
+                                y -= 15;
+                            }
+                        }
+                    }
+                }
+                const pdfBytes = await mergedPdf.save();
+                saveAs(new Blob([pdfBytes], { type: "application/pdf" }), `${fileName}.pdf`);
+                showNotification("Files Merged Successfully to PDF!", "success");
+            } catch (err) { 
+                console.error(err);
+                showNotification("Merge failed. Ensure PDFs are valid.", "error"); 
+            }
+            setMergeProcessing(false);
+        };
+
+        // --- Convert Handlers ---
+        const handleConvertUpload = (e) => { 
+            if (e.target.files?.[0]) {
+                setConvertFile(e.target.files[0]); 
+                showNotification(`PDF ready for conversion: ${e.target.files[0].name}`, 'info');
+            }
+        };
+
+        const executeConvert = async () => {
+            if (!convertFile) return;
+            setConvertProcessing(true);
+            const fileName = (convertFileName || 'omnipdf_export').replace(/\.(jpg|txt|docx|zip)$/i, '');
+
+            try {
+                const arrayBuffer = await convertFile.arrayBuffer();
+
+                if (convertMode === 'jpg') {
+                    const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+                    const zip = new JSZip();
+                    const imgFolder = zip.folder(fileName);
+                    for (let i = 1; i <= pdf.numPages; i++) {
+                        const page = await pdf.getPage(i);
+                        const viewport = page.getViewport({ scale: 2.0 });
+                        const canvas = document.createElement('canvas');
+                        const context = canvas.getContext('2d');
+                        canvas.height = viewport.height;
+                        canvas.width = viewport.width;
+                        await page.render({ canvasContext: context, viewport: viewport }).promise;
+                        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+                        imgFolder.file(`page-${i}.jpg`, blob);
+                    }
+                    const zipContent = await zip.generateAsync({ type: "blob" });
+                    saveAs(zipContent, `${fileName}.zip`);
+                    showNotification("PDF to JPG Conversion Complete!", "success");
+
+                } else if (convertMode === 'txt') {
+                    const text = await extractTextFromPdf(arrayBuffer);
+                    saveAs(new Blob([text], { type: "text/plain;charset=utf-8" }), `${fileName}.txt`);
+                    showNotification("Text Extraction Complete!", "success");
+
+                } else if (convertMode === 'docx') {
+                    const text = await extractTextFromPdf(arrayBuffer);
+                    // Create a very basic DOCX file by saving as text with the DOCX MIME type
+                    // WARNING: This is text-only and will lose all layout and formatting.
+                    const content = text;
+                    const blob = new Blob([content], { 
+                        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" 
+                    });
+                    saveAs(blob, `${fileName}.docx`);
+                    showNotification("DOCX (Text Only) Created. All formatting was lost.", "warning");
+                }
+            } catch (err) { 
+                console.error(err);
+                showNotification("Conversion failed. Check file validity.", "error"); 
+            }
+            setConvertProcessing(false);
+        };
+
+        return (
+            <div className="min-h-screen py-10 px-4 md:px-8 max-w-5xl mx-auto pb-20">
+                {notification && (
+                    <div className={`fixed top-4 right-4 z-50 px-6 py-3 rounded-xl shadow-2xl backdrop-blur-md border animate-bounce-short ${notification.type === 'error' ? 'bg-red-500/20 border-red-500 text-red-200' : notification.type === 'warning' ? 'bg-yellow-500/20 border-yellow-500 text-yellow-200' : 'bg-emerald-500/20 border-emerald-500 text-emerald-200'}`}>
+                        {notification.msg}
+                    </div>
+                )}
+
+                <header className="mb-12 text-center">
+                    <h1 className="text-4xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500 mb-4">
+                        OmniPDF Command Center
+                    </h1>
+                    <p className="text-slate-400">The browser-based Swiss Army Knife for documents.</p>
+                </header>
+
+                <div className="space-y-6">
+
+                    {/* --- SECTION 1: AI ANALYSIS LAB (Retained for Context) --- */}
+                    <div className="glass-panel rounded-2xl overflow-hidden shadow-2xl border-blue-500/30">
+                        <button 
+                            onClick={() => setOpenSection(openSection === 'ai' ? '' : 'ai')}
+                            className="w-full p-6 flex justify-between items-center bg-gradient-to-r from-slate-800/80 to-blue-900/20 hover:bg-slate-800 transition-colors"
+                        >
+                            <div className="flex items-center gap-4">
+                                <div className="bg-blue-500 p-3 rounded-xl text-white shadow-lg shadow-blue-500/20"><Icons.Sparkles /></div>
+                                <div className="text-left">
+                                    <h2 className="text-xl font-semibold text-white">AI Analysis Lab</h2>
+                                    <p className="text-sm text-blue-200">Summarize & Chat with your PDF</p>
+                                </div>
+                            </div>
+                            <div className={`transition-transform duration-300 ${openSection === 'ai' ? 'rotate-180' : ''}`}>
+                                <Icons.ChevronDown />
+                            </div>
+                        </button>
+                        
+                        <div className={`accordion-content ${openSection === 'ai' ? 'open' : ''}`}>
+                            <div className="p-6 border-t border-slate-700 bg-slate-900/50">
+                                {/* ... AI Logic ... */}
+                                {!aiFile ? (
+                                    <div className="border-2 border-dashed border-blue-500/30 rounded-xl p-10 text-center hover:border-blue-400 transition-colors cursor-pointer relative bg-slate-800/30">
+                                        <input type="file" accept=".pdf" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleAiUpload} />
+                                        <div className="flex flex-col items-center gap-4">
+                                            <div className="bg-blue-500/10 p-4 rounded-full text-blue-400"><Icons.Upload /></div>
+                                            <div>
+                                                <h3 className="text-lg font-medium text-white">Upload PDF to Analyze</h3>
+                                                <p className="text-sm text-slate-400 mt-1">We'll extract text for the AI securely in your browser</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="grid md:grid-cols-3 gap-6">
+                                        <div className="space-y-4">
+                                            <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                                                <div className="flex items-center gap-3 mb-2">
+                                                    <div className="bg-red-500/20 p-2 rounded text-red-400"><Icons.FileText /></div>
+                                                    <div className="truncate text-sm font-medium text-slate-200 flex-1">{aiFile.name}</div>
+                                                    <button onClick={() => { setAiFile(null); setAiContext(""); setAiResponse(""); }} className="text-slate-500 hover:text-red-400"><Icons.Trash size={16}/></button>
+                                                </div>
+                                                <div className="text-xs text-slate-500 flex justify-between">
+                                                    <span>{aiContext ? "Text Extracted" : "Processing..."}</span>
+                                                    <span>{(aiFile.size/1024).toFixed(1)} KB</span>
+                                                </div>
+                                            </div>
+
+                                            <button 
+                                                onClick={handleSummarize}
+                                                disabled={aiLoading || !aiContext}
+                                                className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white p-3 rounded-lg font-semibold flex items-center justify-center gap-2 shadow-lg disabled:opacity-50"
+                                            >
+                                                {aiLoading ? <span className="loader-spin"><Icons.Sparkles /></span> : <Icons.Sparkles />}
+                                                ✨ Summarize PDF
+                                            </button>
+
+                                            <div className="border-t border-slate-700 pt-4">
+                                                <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 block">Ask a Question</label>
+                                                <div className="flex gap-2">
+                                                    <input 
+                                                        type="text" 
+                                                        value={aiQuestion}
+                                                        onChange={(e) => setAiQuestion(e.target.value)}
+                                                        onKeyDown={(e) => e.key === 'Enter' && handleAskQuestion()}
+                                                        placeholder="e.g. What is the deadline?"
+                                                        className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                                                    />
+                                                    <button 
+                                                        onClick={handleAskQuestion}
+                                                        disabled={aiLoading || !aiContext || !aiQuestion}
+                                                        className="bg-slate-700 hover:bg-slate-600 text-white px-3 rounded-lg disabled:opacity-50"
+                                                    >
+                                                        <Icons.Send />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="md:col-span-2 bg-slate-950 rounded-xl border border-slate-800 p-6 min-h-[300px] relative">
+                                            {aiLoading ? (
+                                                <div className="absolute inset-0 flex flex-col items-center justify-center text-blue-400 gap-3">
+                                                    <div className="loader-spin"><Icons.Sparkles /></div>
+                                                    <span className="text-sm animate-pulse">Consulting Gemini AI...</span>
+                                                </div>
+                                            ) : aiResponse ? (
+                                                <div className="ai-response text-slate-300 text-sm overflow-y-auto max-h-[400px]" dangerouslySetInnerHTML={{ __html: marked.parse(aiResponse) }}></div>
+                                            ) : (
+                                                <div className="h-full flex flex-col items-center justify-center text-slate-600 gap-2">
+                                                    <Icons.Sparkles />
+                                                    <p className="text-sm">AI results will appear here</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* --- SECTION 2: MEDIA TO PDF (Updated with FileNameInput) --- */}
+                    <div className="glass-panel rounded-2xl overflow-hidden shadow-2xl">
+                        <button 
+                            onClick={() => setOpenSection(openSection === 'media' ? '' : 'media')}
+                            className="w-full p-6 flex justify-between items-center bg-slate-800/50 hover:bg-slate-800/80 transition-colors"
+                        >
+                            <div className="flex items-center gap-4">
+                                <div className="bg-emerald-500/20 p-3 rounded-xl text-emerald-400"><Icons.Image /></div>
+                                <div className="text-left">
+                                    <h2 className="text-xl font-semibold text-white">Media Studio</h2>
+                                    <p className="text-sm text-slate-400">Convert Images to PDF • Arrange • Rotate (Zero Margins)</p>
+                                </div>
+                            </div>
+                            <div className={`transition-transform duration-300 ${openSection === 'media' ? 'rotate-180' : ''}`}>
+                                <Icons.ChevronDown />
+                            </div>
+                        </button>
+                        
+                        <div className={`accordion-content ${openSection === 'media' ? 'open' : ''}`}>
+                            <div className="p-6 border-t border-slate-700">
+                                
+                                <div className="border-2 border-dashed border-slate-600 rounded-xl p-8 text-center hover:border-emerald-500 transition-colors cursor-pointer relative mb-6">
+                                    <input type="file" multiple accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleMediaUpload} />
+                                    <div className="flex flex-col items-center gap-3">
+                                        <div className="bg-slate-700 p-4 rounded-full"><Icons.Upload /></div>
+                                        <p className="font-medium">Drop images here or click to browse</p>
+                                    </div>
+                                </div>
+
+                                {mediaFiles.length > 0 && (
+                                    <>
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 max-h-[400px] overflow-y-auto pr-2">
+                                            {mediaFiles.map((item, idx) => (
+                                                <div key={item.id} className="relative group bg-slate-800 rounded-lg p-2 border border-slate-700">
+                                                    <div className="aspect-square bg-slate-900 rounded-md overflow-hidden mb-2 relative">
+                                                        <img 
+                                                            src={item.previewUrl} 
+                                                            className="w-full h-full object-cover transition-transform duration-300" 
+                                                            style={{ transform: `rotate(${item.rotation}deg)` }}
+                                                        />
+                                                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                                            <button onClick={() => rotateMedia(item.id)} className="p-2 bg-white/20 rounded-full hover:bg-white/40"><Icons.Rotate /></button>
+                                                            <button onClick={() => removeMedia(item.id)} className="p-2 bg-red-500/80 rounded-full hover:bg-red-500"><Icons.Trash /></button>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-between items-center px-1">
+                                                        <span className="text-xs text-slate-400 truncate w-20">Page {idx + 1}</span>
+                                                        <div className="flex gap-1">
+                                                            <button onClick={() => moveMedia(idx, -1)} disabled={idx===0} className="text-slate-500 hover:text-white disabled:opacity-30"><Icons.ArrowUp /></button>
+                                                            <button onClick={() => moveMedia(idx, 1)} disabled={idx===mediaFiles.length-1} className="text-slate-500 hover:text-white disabled:opacity-30"><Icons.ArrowDown /></button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    
+                                        <div className="flex flex-col md:flex-row justify-end items-center gap-4">
+                                            <div className="w-full md:w-1/2">
+                                                <FileNameInput 
+                                                    fileName={mediaFileName} 
+                                                    setFileName={setMediaFileName} 
+                                                    defaultName="omnipdf_images" 
+                                                    extension="pdf" 
+                                                />
+                                            </div>
+                                            <button 
+                                                onClick={generateMediaPdf}
+                                                disabled={mediaFiles.length === 0 || mediaProcessing}
+                                                className="w-full md:w-auto bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                {mediaProcessing ? <span className="loader-spin"><Icons.Rotate/></span> : <Icons.Download />}
+                                                Generate PDF
+                                            </button>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* --- SECTION 3: MERGE (PDF + WORD) (Updated with FileNameInput) --- */}
+                    <div className="glass-panel rounded-2xl overflow-hidden shadow-2xl">
+                        <button 
+                            onClick={() => setOpenSection(openSection === 'merge' ? '' : 'merge')}
+                            className="w-full p-6 flex justify-between items-center bg-slate-800/50 hover:bg-slate-800/80 transition-colors"
+                        >
+                            <div className="flex items-center gap-4">
+                                <div className="bg-purple-500/20 p-3 rounded-xl text-purple-400"><Icons.Merge /></div>
+                                <div className="text-left">
+                                    <h2 className="text-xl font-semibold text-white">Universal Merger</h2>
+                                    <p className="text-sm text-slate-400">Merge PDFs & Word Docs • Reorder • Output to PDF</p>
+                                </div>
+                            </div>
+                            <div className={`transition-transform duration-300 ${openSection === 'merge' ? 'rotate-180' : ''}`}>
+                                <Icons.ChevronDown />
+                            </div>
+                        </button>
+                        
+                        <div className={`accordion-content ${openSection === 'merge' ? 'open' : ''}`}>
+                            <div className="p-6 border-t border-slate-700">
+                                <div className="flex gap-4 mb-6">
+                                    <label className="flex-1 cursor-pointer bg-slate-700 hover:bg-slate-600 transition-colors p-4 rounded-xl text-center border border-slate-600">
+                                        <input type="file" multiple accept=".pdf,.docx" className="hidden" onChange={handleMergeUpload} />
+                                        <div className="font-semibold text-purple-300 mb-1">+ Add Files</div>
+                                        <div className="text-xs text-slate-400">Supports PDF & Word (.docx)</div>
+                                    </label>
+                                </div>
+
+                                <div className="space-y-2 mb-6 max-h-60 overflow-y-auto">
+                                    {mergeFiles.map((file, idx) => (
+                                        <div key={file.id} className="flex items-center gap-4 bg-slate-800 p-3 rounded-lg border border-slate-700">
+                                            <div className={`px-2 py-1 rounded text-xs font-bold uppercase ${file.type === 'docx' ? 'bg-blue-900 text-blue-300' : 'bg-red-900 text-red-300'}`}>
+                                                {file.type}
+                                            </div>
+                                            <div className="flex-1 truncate text-sm">{file.file.name}</div>
+                                            <div className="flex items-center gap-2">
+                                                <button onClick={() => moveMergeFile(idx, -1)} disabled={idx===0} className="p-1 hover:bg-slate-700 rounded"><Icons.ArrowUp /></button>
+                                                <button onClick={() => moveMergeFile(idx, 1)} disabled={idx===mergeFiles.length-1} className="p-1 hover:bg-slate-700 rounded"><Icons.ArrowDown /></button>
+                                                <button onClick={() => setMergeFiles(prev => prev.filter(f => f.id !== file.id))} className="p-1 hover:bg-red-900/50 text-red-400 rounded"><Icons.Trash /></button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {mergeFiles.length === 0 && <div className="text-center text-slate-500 py-4 italic">No files selected</div>}
+                                </div>
+
+                                <div className="flex flex-col md:flex-row justify-between items-center bg-slate-800/50 p-4 rounded-lg gap-4">
+                                    <div className="flex-1">
+                                        <FileNameInput 
+                                            fileName={mergeFileName} 
+                                            setFileName={setMergeFileName} 
+                                            defaultName="omnipdf_merged" 
+                                            extension="pdf" 
+                                        />
+                                        <p className="text-xs text-purple-300 mt-1">
+                                            * Output is always PDF. Lossless merging into an editable Word file is not supported.
+                                        </p>
+                                    </div>
+                                    <button 
+                                        onClick={executeMerge}
+                                        disabled={mergeFiles.length < 2 || mergeProcessing}
+                                        className="w-full md:w-auto bg-purple-600 hover:bg-purple-500 text-white px-6 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+                                    >
+                                        {mergeProcessing ? <span className="loader-spin"><Icons.Rotate/></span> : <Icons.Merge />}
+                                        Merge Files
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* --- SECTION 4: CONVERTER (PDF -> JPG/TXT/DOCX) (Updated with FileNameInput and DOCX option) --- */}
+                    <div className="glass-panel rounded-2xl overflow-hidden shadow-2xl">
+                        <button 
+                            onClick={() => setOpenSection(openSection === 'convert' ? '' : 'convert')}
+                            className="w-full p-6 flex justify-between items-center bg-slate-800/50 hover:bg-slate-800/80 transition-colors"
+                        >
+                            <div className="flex items-center gap-4">
+                                <div className="bg-orange-500/20 p-3 rounded-xl text-orange-400"><Icons.Convert /></div>
+                                <div className="text-left">
+                                    <h2 className="text-xl font-semibold text-white">Export Tool</h2>
+                                    <p className="text-sm text-slate-400">PDF to Images (ZIP) • Text (.txt) • DOCX (Text-only)</p>
+                                </div>
+                            </div>
+                            <div className={`transition-transform duration-300 ${openSection === 'convert' ? 'rotate-180' : ''}`}>
+                                <Icons.ChevronDown />
+                            </div>
+                        </button>
+                        
+                        <div className={`accordion-content ${openSection === 'convert' ? 'open' : ''}`}>
+                            <div className="p-6 border-t border-slate-700">
+                                <div className="grid md:grid-cols-2 gap-8">
+                                    <div>
+                                        <label className="block mb-2 text-sm font-medium text-slate-300">1. Select Source PDF</label>
+                                        <input 
+                                            type="file" 
+                                            accept=".pdf"
+                                            onChange={handleConvertUpload}
+                                            className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-orange-600 file:text-white hover:file:bg-orange-500 bg-slate-800 rounded-lg border border-slate-700 cursor-pointer"
+                                        />
+                                        {convertFile && (
+                                            <p className="text-sm text-slate-400 mt-2 truncate">Selected: {convertFile.name}</p>
+                                        )}
+                                    </div>
+
+                                    <div>
+                                        <label className="block mb-2 text-sm font-medium text-slate-300">2. Select Output Format</label>
+                                        <div className="grid grid-cols-3 gap-2">
+                                            <button 
+                                                onClick={() => setConvertMode('jpg')}
+                                                className={`py-3 px-1 text-xs rounded-lg border transition-all ${convertMode === 'jpg' ? 'bg-orange-600/20 border-orange-500 text-orange-400' : 'bg-slate-800 border-slate-700 text-slate-500'}`}
+                                            >
+                                                JPG Images (ZIP)
+                                            </button>
+                                            <button 
+                                                onClick={() => setConvertMode('txt')}
+                                                className={`py-3 px-1 text-xs rounded-lg border transition-all ${convertMode === 'txt' ? 'bg-orange-600/20 border-orange-500 text-orange-400' : 'bg-slate-800 border-slate-700 text-slate-500'}`}
+                                            >
+                                                Text File (.txt)
+                                            </button>
+                                            <button 
+                                                onClick={() => setConvertMode('docx')}
+                                                className={`py-3 px-1 text-xs rounded-lg border transition-all ${convertMode === 'docx' ? 'bg-orange-600/20 border-orange-500 text-orange-400' : 'bg-slate-800 border-slate-700 text-slate-500'}`}
+                                            >
+                                                DOCX (Text Only)
+                                            </button>
+                                        </div>
+                                        {convertMode === 'docx' && (
+                                            <p className="text-xs text-red-400 mt-2">
+                                                * WARNING: DOCX output is text-only. All formatting, images, and layout will be lost due to client-side limitations.
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                                
+                                <div className="mt-8 flex flex-col md:flex-row justify-end items-center gap-4">
+                                    <div className="w-full md:w-1/2">
+                                        <FileNameInput 
+                                            fileName={convertFileName} 
+                                            setFileName={setConvertFileName} 
+                                            defaultName="omnipdf_export" 
+                                            extension={convertMode === 'jpg' ? 'zip' : convertMode} 
+                                        />
+                                    </div>
+                                    <button 
+                                        onClick={executeConvert}
+                                        disabled={!convertFile || convertProcessing}
+                                        className="w-full md:w-auto bg-orange-600 hover:bg-orange-500 text-white px-8 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+                                    >
+                                        {convertProcessing ? <span className="loader-spin"><Icons.Rotate/></span> : <Icons.Convert />}
+                                        Convert & Download
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+
+</script>
+
+</body>
+</html>
